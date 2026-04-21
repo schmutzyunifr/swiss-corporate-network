@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swiss Corporate Network Explorer</title>
+  <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0ede8;
+      color: #2c2c2c;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 20px;
+      height: 54px;
+      background: #1b2a3b;
+      color: #fff;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+    #topbar h1 { font-size: 15px; font-weight: 600; letter-spacing: .4px; white-space: nowrap; }
+    #year-badge {
+      background: #c0392b; color: #fff;
+      font-size: 12px; font-weight: 700;
+      padding: 3px 10px; border-radius: 12px; letter-spacing: .5px;
+    }
+    #node-count {
+      font-size: 12px; color: rgba(255,255,255,.45);
+      white-space: nowrap;
+    }
+
+    /* ── Search area in topbar ── */
+    #search-wrap {
+      margin-left: auto;
+      position: relative;
+      width: 280px;
+    }
+    #search-icon {
+      position: absolute; left: 11px; top: 50%;
+      transform: translateY(-50%);
+      font-size: 14px; opacity: .5; pointer-events: none;
+    }
+    #search-input {
+      width: 100%;
+      padding: 7px 32px 7px 34px;
+      border-radius: 20px; border: none;
+      background: rgba(255,255,255,.13);
+      color: #fff; font-size: 13px; outline: none;
+      transition: background .2s;
+    }
+    #search-input::placeholder { color: rgba(255,255,255,.4); }
+    #search-input:focus { background: rgba(255,255,255,.22); }
+    #clear-btn {
+      display: none;
+      position: absolute; right: 10px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      color: rgba(255,255,255,.55); cursor: pointer;
+      font-size: 16px; line-height: 1;
+    }
+
+    /* ── Autocomplete dropdown ── */
+    #autocomplete {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px); left: 0; right: 0;
+      background: white; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      overflow: hidden; z-index: 100;
+      max-height: 320px; overflow-y: auto;
+    }
+    .ac-group-title {
+      padding: 8px 14px 4px;
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; color: #aaa;
+      border-top: 1px solid #f0f0f0;
+    }
+    .ac-group-title:first-child { border-top: none; }
+    .ac-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 14px; cursor: pointer;
+      transition: background .1s;
+    }
+    .ac-item:hover { background: #f5f3ef; }
+    .ac-dot {
+      width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+    }
+    .ac-main { font-size: 13px; font-weight: 600; color: #222; }
+    .ac-sub  { font-size: 11px; color: #888; margin-left: auto; white-space: nowrap; }
+    .ac-count { font-size: 11px; color: #aaa; }
+    .ac-empty { padding: 14px; font-size: 13px; color: #aaa; text-align: center; }
+
+    /* ── Main layout ── */
+    #main {
+      flex: 1; display: flex;
+      position: relative; overflow: hidden;
+    }
+    #sigma-container {
+      flex: 1; background: #faf9f6;
+    }
+
+    /* ── Welcome splash (shown before any search) ── */
+    #splash {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 10px; pointer-events: none;
+      transition: opacity .4s;
+    }
+    #splash .big-icon { font-size: 48px; opacity: .15; }
+    #splash p {
+      font-size: 15px; color: #888;
+      text-align: center; line-height: 1.6; max-width: 340px;
+    }
+    #splash .hint {
+      font-size: 12px; color: #bbb; margin-top: 4px;
+    }
+    #random-btn {
+      pointer-events: all;
+      margin-top: 16px;
+      padding: 9px 22px;
+      background: #1b2a3b; color: white;
+      border: none; border-radius: 20px;
+      font-size: 13px; cursor: pointer;
+      transition: background .15s;
+    }
+    #random-btn:hover { background: #2c3e55; }
+
+    /* ── Loading overlay ── */
+    #loading {
+      position: absolute; inset: 0;
+      background: #faf9f6;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px; z-index: 50;
+    }
+    #loading h2 { font-size: 16px; color: #444; font-weight: 500; }
+    #progress-bar-wrap {
+      width: 260px; height: 4px;
+      background: #e0ddd8; border-radius: 2px;
+    }
+    #progress-bar {
+      height: 100%; width: 0%;
+      background: #1b2a3b; border-radius: 2px;
+      transition: width .3s ease;
+    }
+    #loading-msg { font-size: 12px; color: #aaa; }
+
+    /* ── Back button ── */
+    #back-btn {
+      display: none;
+      position: absolute; top: 14px; left: 14px;
+      background: white; border: 1px solid #ccc;
+      border-radius: 20px; padding: 7px 16px;
+      font-size: 13px; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,.1); z-index: 10;
+    }
+    #back-btn:hover { background: #f5f3ef; }
+
+    /* ── Hint overlay (during ego-network view) ── */
+    #ego-hint {
+      display: none;
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      background: rgba(27,42,59,.85); color: white;
+      border-radius: 20px; padding: 6px 16px;
+      font-size: 12px; white-space: nowrap; z-index: 10;
+      pointer-events: none;
+    }
+
+    /* ── Legend ── */
+    #legend {
+      position: absolute; bottom: 18px; left: 14px;
+      background: rgba(255,255,255,.92); border-radius: 8px;
+      padding: 12px 16px; font-size: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    }
+    #legend h4 {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; color: #999; margin-bottom: 8px;
+    }
+    .leg { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .leg-note { margin-top: 8px; font-size: 11px; color: #aaa;
+                border-top: 1px solid #eee; padding-top: 6px; }
+
+    /* ── Stats ── */
+    #stats {
+      position: absolute; bottom: 18px; right: 14px;
+      background: rgba(255,255,255,.88); border-radius: 8px;
+      padding: 8px 14px; font-size: 12px; color: #777;
+      box-shadow: 0 2px 6px rgba(0,0,0,.08);
+      transition: right .25s;
+    }
+
+    /* ── Info panel ── */
+    #info-panel {
+      width: 300px; flex-shrink: 0;
+      background: white; border-left: 1px solid #e5e5e5;
+      overflow-y: auto;
+      transform: translateX(300px);
+      transition: transform .25s ease;
+      display: flex; flex-direction: column;
+    }
+    #info-panel.open { transform: translateX(0); }
+
+    #info-header {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    #info-type {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; color: #999; margin-bottom: 4px;
+    }
+    #info-id {
+      font-size: 18px; font-weight: 700;
+      color: #1b2a3b; word-break: break-all;
+    }
+    #info-body { padding: 16px 20px; }
+    .info-row { margin-bottom: 13px; }
+    .info-label {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: .8px; color: #aaa; margin-bottom: 2px;
+    }
+    .info-value { font-size: 13px; color: #333; }
+    .info-big { font-size: 22px; font-weight: 700; color: #1b2a3b; }
+
+    #conn-section {
+      padding: 14px 20px;
+      border-top: 1px solid #f0f0f0;
+    }
+    #conn-section h3 {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; color: #aaa; margin-bottom: 10px;
+    }
+    .conn-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 0; border-bottom: 1px solid #f8f8f8;
+      font-size: 12px; cursor: pointer;
+    }
+    .conn-item:hover { opacity: .75; }
+    .conn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .conn-id   { font-weight: 600; color: #333; }
+    .conn-place { color: #aaa; font-size: 11px; }
+    .conn-more  { font-size: 11px; color: #aaa; padding-top: 6px; }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div id="topbar">
+  <h1>Swiss Corporate Network Explorer</h1>
+  <span id="year-badge">—</span>
+  <span id="node-count"></span>
+  <div id="search-wrap">
+    <span id="search-icon">🔍</span>
+    <input id="search-input" type="text"
+           placeholder="Municipality, canton or node ID…"
+           autocomplete="off" />
+    <button id="clear-btn" title="Clear">✕</button>
+    <div id="autocomplete"></div>
+  </div>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Loading -->
+  <div id="loading">
+    <h2>Loading network data…</h2>
+    <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+    <div id="loading-msg">Fetching data_full.json</div>
+  </div>
+
+  <!-- Canvas -->
+  <div id="sigma-container"></div>
+
+  <!-- Welcome splash -->
+  <div id="splash">
+    <div class="big-icon">🕸️</div>
+    <p>Search for a <strong>municipality</strong>, <strong>canton</strong>,
+       or node ID to explore its corporate network.</p>
+    <p class="hint">Each node connects firms and directors across Switzerland.</p>
+    <button id="random-btn">Explore a random firm ↗</button>
+  </div>
+
+  <!-- Back button (ego-network mode) -->
+  <button id="back-btn" onclick="resetView()">← New search</button>
+
+  <!-- Ego-network hint -->
+  <div id="ego-hint">Click any node to re-centre · Scroll to zoom</div>
+
+  <!-- Legend -->
+  <div id="legend">
+    <h4>Selected node</h4>
+    <div class="leg"><div class="leg-dot" style="background:#c0392b"></div> Selected</div>
+    <h4 style="margin-top:8px">Direct connections (1 hop)</h4>
+    <div class="leg"><div class="leg-dot" style="background:#1f5fa6"></div> Firm</div>
+    <div class="leg"><div class="leg-dot" style="background:#e07b39"></div> Director</div>
+    <h4 style="margin-top:8px">Indirect connections (2 hops)</h4>
+    <div class="leg"><div class="leg-dot" style="background:#b8cfe8"></div> Firm</div>
+    <div class="leg"><div class="leg-dot" style="background:#f0d0b0"></div> Director</div>
+    <div class="leg-note">Size = connections<br>Position = Swiss municipality</div>
+  </div>
+
+  <!-- Stats -->
+  <div id="stats" id="stats"></div>
+
+  <!-- Info panel -->
+  <div id="info-panel">
+    <div id="info-header">
+      <div id="info-type"></div>
+      <div id="info-id"></div>
+    </div>
+    <div id="info-body"></div>
+    <div id="conn-section">
+      <h3>Direct connections</h3>
+      <div id="conn-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Field index constants (compact array format) ──────────────────────────────
+// firms:     [municipality, canton, nb_directors_full, capital_mchf, x, y]
+const F_MUN=0, F_CTN=1, F_NB=2, F_CAP=3, F_X=4, F_Y=5;
+// directors: [municipality, canton, degree, gender, function, language, city, x, y]
+const D_MUN=0, D_CTN=1, D_DEG=2, D_GEN=3, D_FUN=4, D_LNG=5, D_CTY=6, D_X=7, D_Y=8;
+
+// ── Colours ───────────────────────────────────────────────────────────────────
+const C = {
+  FIRM      : '#1f5fa6',          // hop-1 firm
+  DIR       : '#e07b39',          // hop-1 director
+  FIRM_2    : '#b8cfe8',          // hop-2 firm  (muted blue)
+  DIR_2     : '#f0d0b0',          // hop-2 director (muted orange)
+  SEL       : '#c0392b',          // selected node
+  EDGE_HI   : 'rgba(60,60,60,0.55)',   // edges touching hop-1 nodes
+  EDGE_HI2  : 'rgba(180,175,170,0.30)', // edges between hop-2 nodes only
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let D = null;        // parsed data_full.json
+let adj = {};        // adjacency map: nodeId → [neighbourId, ...]
+let graph = null;
+let renderer = null;
+let activeNode = null;
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+async function init() {
+  setProgress(10, 'Fetching data_full.json…');
+
+  let raw;
+  try {
+    const res = await fetch('data_full.json');
+    if (!res.ok) throw new Error(res.statusText);
+    setProgress(40, 'Parsing JSON (this takes a few seconds)…');
+    raw = await res.text();
+  } catch(e) {
+    showFetchError();
+    return;
+  }
+
+  setProgress(65, 'Building adjacency map…');
+  // Parse on next tick so progress bar renders
+  await tick();
+  D = JSON.parse(raw);
+  raw = null;   // free memory
+
+  setProgress(80, 'Building search index…');
+  await tick();
+
+  // Build adjacency from edge list
+  for (const [f, d] of D.edges) {
+    (adj[f] = adj[f] || []).push(d);
+    (adj[d] = adj[d] || []).push(f);
+  }
+
+  setProgress(95, 'Initialising renderer…');
+  await tick();
+
+  buildEmptyRenderer();
+
+  setProgress(100, 'Done');
+  await tick();
+  document.getElementById('loading').style.display = 'none';
+
+  document.getElementById('year-badge').textContent = D.year;
+  document.getElementById('node-count').textContent =
+    `${D.meta.n_firms.toLocaleString()} firms · ` +
+    `${D.meta.n_directors.toLocaleString()} directors · ` +
+    `${D.meta.n_edges.toLocaleString()} board seats`;
+  document.getElementById('stats').textContent =
+    `${D.meta.n_firms.toLocaleString()} firms · ` +
+    `${D.meta.n_directors.toLocaleString()} directors`;
+
+  // Wiring
+  document.getElementById('search-input').addEventListener('input', onSearchInput);
+  document.getElementById('search-input').addEventListener('keydown', onSearchKey);
+  document.getElementById('clear-btn').addEventListener('click', clearSearch);
+  document.getElementById('random-btn').addEventListener('click', exploreRandom);
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#search-wrap')) closeDropdown();
+  });
+}
+
+function setProgress(pct, msg) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('loading-msg').textContent = msg;
+}
+
+function tick() {
+  return new Promise(r => setTimeout(r, 0));
+}
+
+// ── Empty renderer (no nodes, just a canvas) ──────────────────────────────────
+function buildEmptyRenderer() {
+  graph = new graphology.UndirectedGraph({ multi: false });
+  renderer = new Sigma(graph, document.getElementById('sigma-container'), {
+    renderLabels: false, renderEdgeLabels: false,
+    minCameraRatio: 0.02, maxCameraRatio: 50,
+  });
+  renderer.on('clickNode',  ({ node }) => selectNode(node));
+  renderer.on('clickStage', ()          => { /* do nothing in empty state */ });
+}
+
+// ── Build ego-network graph (radial layout) ───────────────────────────────────
+// Placing nodes at radial positions (seed = centre, hop-1 = inner ring,
+// hop-2 = outer ring) keeps everything in a small, fixed coordinate space
+// that Sigma normalises predictably — no camera animation needed.
+const MAX_HOP2 = 150;   // cap outer ring for readability
+const R1 = 2.2;         // inner-ring radius  (graph units)
+const R2 = 5.5;         // outer-ring radius
+
+function buildEgoGraph(seedId) {
+  // ── 1. Collect neighbourhood ──────────────────────────────────────────────
+  const hop1 = new Set(adj[seedId] || []);
+  const hop2 = new Set();
+  hop1.forEach(n => {
+    (adj[n] || []).forEach(nn => {
+      if (nn !== seedId && !hop1.has(nn)) hop2.add(nn);
+    });
+  });
+
+  // Sort hop-2 by degree (most connected first) and cap at MAX_HOP2
+  let hop2arr = [...hop2].sort((a, b) => {
+    const da = a[0]==='C' ? (D.firms[a]?.[F_NB]||0) : (D.directors[a]?.[D_DEG]||0);
+    const db = b[0]==='C' ? (D.firms[b]?.[F_NB]||0) : (D.directors[b]?.[D_DEG]||0);
+    return db - da;
+  });
+  const hop2hidden = Math.max(0, hop2arr.length - MAX_HOP2);
+  hop2arr = hop2arr.slice(0, MAX_HOP2);
+  const hop2shown = new Set(hop2arr);
+
+  // ── 2. Assign radial positions ────────────────────────────────────────────
+  const pos = {};
+  pos[seedId] = { x: 0, y: 0 };
+
+  const hop1arr = [...hop1];
+  hop1arr.forEach((n, i) => {
+    const a = (2 * Math.PI * i / hop1arr.length) - Math.PI / 2;
+    pos[n] = { x: R1 * Math.cos(a), y: R1 * Math.sin(a) };
+  });
+  hop2arr.forEach((n, i) => {
+    const a = (2 * Math.PI * i / hop2arr.length) - Math.PI / 2;
+    pos[n] = { x: R2 * Math.cos(a), y: R2 * Math.sin(a) };
+  });
+
+  // ── 3. Node colour by hop ─────────────────────────────────────────────────
+  function ncolor(nid, isFirm) {
+    if (nid === seedId)   return C.SEL;
+    if (hop1.has(nid))    return isFirm ? C.FIRM  : C.DIR;
+    /* hop-2 */           return isFirm ? C.FIRM_2 : C.DIR_2;
+  }
+
+  // ── 4. Populate graph ─────────────────────────────────────────────────────
+  graph.clear();
+
+  const addNode = (nid) => {
+    if (!pos[nid]) return;
+    const isFirm = nid[0] === 'C';
+    const v = isFirm ? D.firms[nid] : D.directors[nid];
+    if (!v) return;
+    const deg = isFirm ? (v[F_NB] || (adj[nid]||[]).length)
+                       : (v[D_DEG] || (adj[nid]||[]).length);
+    graph.addNode(nid, {
+      x: pos[nid].x, y: pos[nid].y,
+      size : nodeSize(deg, isFirm ? 'firm' : 'dir', nid === seedId),
+      color: ncolor(nid, isFirm),
+      label: nid,
+    });
+  };
+
+  addNode(seedId);
+  hop1arr.forEach(addNode);
+  hop2arr.forEach(addNode);
+
+  // ── 5. Add edges via adjacency map (fast: O(|visible|)) ───────────────────
+  const seen = new Set();
+  graph.forEachNode(nid => {
+    (adj[nid] || []).forEach(nbr => {
+      if (!graph.hasNode(nbr)) return;
+      const key = nid < nbr ? `${nid}||${nbr}` : `${nbr}||${nid}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const close = nid === seedId || hop1.has(nid) || nbr === seedId || hop1.has(nbr);
+      graph.addEdgeWithKey(key, nid, nbr, {
+        color: close ? C.EDGE_HI : C.EDGE_HI2,
+        size : close ? 0.9 : 0.4,
+      });
+    });
+  });
+
+  // ── 6. Render — no camera animation needed (radial coords are stable) ─────
+  renderer.refresh();
+  return { hop1, hop2, hop2arr, hop2hidden };
+}
+
+// ── Select / re-centre on a node ──────────────────────────────────────────────
+function selectNode(nodeId) {
+  activeNode = nodeId;
+
+  const isFirm = nodeId[0] === 'C';
+
+  // Build ego-network (radial layout) and render
+  const { hop1, hop2, hop2arr, hop2hidden } = buildEgoGraph(nodeId);
+
+  // Info panel
+  if (isFirm) {
+    const v = D.firms[nodeId] || [];
+    showFirmPanel(nodeId, v, hop1, hop2, hop2hidden);
+  } else {
+    const v = D.directors[nodeId] || [];
+    showDirPanel(nodeId, v, hop1, hop2, hop2hidden);
+  }
+
+  document.getElementById('splash').style.opacity = '0';
+  document.getElementById('back-btn').style.display  = 'block';
+  document.getElementById('ego-hint').style.display  = 'block';
+  document.getElementById('info-panel').classList.add('open');
+  // No camera animation: radial layout is always centred at (0,0) which
+  // Sigma normalises correctly without needing an explicit camera move.
+}
+
+// ── Reset / new search ────────────────────────────────────────────────────────
+function resetView() {
+  activeNode = null;
+  graph.clear();
+  renderer.refresh();
+  renderer.getCamera().animatedReset({ duration: 300 });
+
+  document.getElementById('info-panel').classList.remove('open');
+  document.getElementById('back-btn').style.display  = 'none';
+  document.getElementById('ego-hint').style.display  = 'none';
+  document.getElementById('splash').style.opacity    = '1';
+
+  document.getElementById('search-input').value = '';
+  document.getElementById('clear-btn').style.display = 'none';
+}
+
+// ── Info panels ───────────────────────────────────────────────────────────────
+function showFirmPanel(id, v, hop1, hop2, hop2hidden) {
+  document.getElementById('info-type').textContent = 'Company';
+  document.getElementById('info-id').textContent   = id;
+
+  let html = irow('Municipality', v[F_MUN] || '—');
+  html += irow('Canton', v[F_CTN] ? v[F_CTN].toUpperCase() : '—');
+  html += irow('Directors (direct, 1 hop)',
+               `<span class="info-big">${hop1.size}</span>`);
+  if (v[F_NB])  html += irow('Total directors (full network)', v[F_NB]);
+  if (v[F_CAP]) html += irow('Share capital', `CHF ${v[F_CAP].toFixed(3)} M`);
+  const hop2label = hop2hidden > 0
+    ? `${hop2.size} <span style="font-size:11px;color:#aaa">(${hop2hidden} not shown)</span>`
+    : hop2.size;
+  html += irow('Firms reachable via shared directors (2 hops)', hop2label);
+
+  document.getElementById('info-body').innerHTML = html;
+  renderConnList(hop1);
+}
+
+function showDirPanel(id, v, hop1, hop2, hop2hidden) {
+  document.getElementById('info-type').textContent = 'Director';
+  document.getElementById('info-id').textContent   = id;
+
+  const city = v[D_CTY] || v[D_MUN] || '—';
+  let html = irow('City / Municipality', city);
+  html += irow('Canton', v[D_CTN] ? v[D_CTN].toUpperCase() : '—');
+  html += irow('Language region', v[D_LNG] || '—');
+  html += irow('Function', v[D_FUN] || '—');
+  html += irow('Gender', v[D_GEN] === 'M' ? 'Male' : v[D_GEN] === 'F' ? 'Female' : '—');
+  html += irow('Board seats (direct, 1 hop)',
+               `<span class="info-big">${hop1.size}</span>`);
+  const hop2label = hop2hidden > 0
+    ? `${hop2.size} <span style="font-size:11px;color:#aaa">(${hop2hidden} not shown)</span>`
+    : hop2.size;
+  html += irow('Directors reachable via shared firms (2 hops)', hop2label);
+
+  document.getElementById('info-body').innerHTML = html;
+  renderConnList(hop1);
+}
+
+function irow(label, value) {
+  return `<div class="info-row">
+    <div class="info-label">${label}</div>
+    <div class="info-value">${value}</div>
+  </div>`;
+}
+
+function renderConnList(hop1) {
+  const items = [...hop1].slice(0, 12).map(nid => {
+    const isFirm = nid[0] === 'C';
+    const v = isFirm ? (D.firms[nid] || []) : (D.directors[nid] || []);
+    const place = isFirm ? v[F_MUN] : (v[D_CTY] || v[D_MUN]);
+    const color = isFirm ? C.FIRM : C.DIR;
+    return `<div class="conn-item" onclick="selectNode('${nid}')">
+      <div class="conn-dot" style="background:${color}"></div>
+      <span class="conn-id">${nid}</span>
+      ${place ? `<span class="conn-place">${place}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  const more = hop1.size > 12
+    ? `<div class="conn-more">+ ${hop1.size - 12} more connections</div>` : '';
+  document.getElementById('conn-list').innerHTML = items + more;
+}
+
+// ── Node sizing ───────────────────────────────────────────────────────────────
+function nodeSize(deg, type, isSelected) {
+  const base = type === 'firm' ? 5 : 4;
+  const s = base + Math.sqrt(Math.max(deg, 0)) * 2.0;
+  return isSelected ? s * 1.6 : s;
+}
+
+// ── Search / autocomplete ─────────────────────────────────────────────────────
+let searchTimeout = null;
+
+function onSearchInput(e) {
+  const q = e.target.value.trim();
+  document.getElementById('clear-btn').style.display = q ? 'block' : 'none';
+  clearTimeout(searchTimeout);
+  if (!q) { closeDropdown(); return; }
+  searchTimeout = setTimeout(() => renderDropdown(q), 120);
+}
+
+function onSearchKey(e) {
+  if (e.key === 'Escape') clearSearch();
+  if (e.key === 'Enter') {
+    const first = document.querySelector('.ac-item[data-id]');
+    if (first) pickNode(first.dataset.id);
+  }
+}
+
+function renderDropdown(q) {
+  const ql = q.toLowerCase();
+  const ac = document.getElementById('autocomplete');
+
+  // 1. Direct node ID match
+  const idMatches = [];
+  if (q.match(/^[CP]\d+$/i)) {
+    const uid = q.toUpperCase();
+    if (D.firms[uid])     idMatches.push({ id: uid, type: 'firm' });
+    if (D.directors[uid]) idMatches.push({ id: uid, type: 'director' });
+  }
+
+  // 2. Municipality matches (from mun_index)
+  const munMatches = [];
+  for (const [mun, ids] of Object.entries(D.mun_index)) {
+    if (mun.includes(ql)) {
+      const nFirms = ids.filter(i => i[0] === 'C').length;
+      const nDirs  = ids.filter(i => i[0] === 'P').length;
+      munMatches.push({ mun, ids, nFirms, nDirs });
+      if (munMatches.length >= 8) break;
+    }
+  }
+
+  // 3. Canton matches
+  const ctnMatches = [];
+  const knownCtns = new Set();
+  for (const v of Object.values(D.firms)) {
+    if (v[F_CTN] && v[F_CTN].toLowerCase().startsWith(ql)) knownCtns.add(v[F_CTN]);
+  }
+  knownCtns.forEach(c => ctnMatches.push(c));
+
+  // Build HTML
+  let html = '';
+
+  if (idMatches.length) {
+    html += `<div class="ac-group-title">Node ID</div>`;
+    idMatches.forEach(({ id, type }) => {
+      const color = type === 'firm' ? C.FIRM : C.DIR;
+      const v = type === 'firm' ? D.firms[id] : D.directors[id];
+      const place = type === 'firm' ? v[F_MUN] : (v[D_CTY] || v[D_MUN]);
+      const deg   = type === 'firm' ? v[F_NB] : v[D_DEG];
+      html += `<div class="ac-item" data-id="${id}">
+        <div class="ac-dot" style="background:${color}"></div>
+        <span class="ac-main">${id}</span>
+        <span class="ac-sub">${place || ''} &nbsp;·&nbsp; ${deg || 0} connections</span>
+      </div>`;
+    });
+  }
+
+  if (munMatches.length) {
+    html += `<div class="ac-group-title">Municipality</div>`;
+    munMatches.forEach(({ mun, ids, nFirms, nDirs }) => {
+      // Pick the most-connected firm in this municipality as entry point
+      const topFirm = ids
+        .filter(i => i[0] === 'C' && D.firms[i])
+        .sort((a, b) => (D.firms[b][F_NB]||0) - (D.firms[a][F_NB]||0))[0];
+      const entryId = topFirm || ids[0];
+      if (!entryId) return;
+      html += `<div class="ac-item" data-id="${entryId}">
+        <div class="ac-dot" style="background:#6a9fc0"></div>
+        <span class="ac-main" style="text-transform:capitalize">${mun}</span>
+        <span class="ac-sub">${nFirms} firms &nbsp;·&nbsp; ${nDirs} directors</span>
+      </div>`;
+    });
+  }
+
+  if (!idMatches.length && !munMatches.length) {
+    html = `<div class="ac-empty">No results for "<em>${q}</em>"</div>`;
+  }
+
+  ac.innerHTML = html;
+  ac.style.display = 'block';
+
+  // Bind click events
+  ac.querySelectorAll('.ac-item[data-id]').forEach(el => {
+    el.addEventListener('click', () => pickNode(el.dataset.id));
+  });
+}
+
+function pickNode(nodeId) {
+  closeDropdown();
+  document.getElementById('search-input').value = nodeId;
+  selectNode(nodeId);
+}
+
+function closeDropdown() {
+  document.getElementById('autocomplete').style.display = 'none';
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  document.getElementById('clear-btn').style.display = 'none';
+  closeDropdown();
+}
+
+// ── Random exploration ────────────────────────────────────────────────────────
+function exploreRandom() {
+  // Pick a random firm with a high degree (interesting network)
+  const candidates = Object.entries(D.firms)
+    .filter(([, v]) => v[F_NB] >= 5)
+    .map(([id]) => id);
+  if (!candidates.length) return;
+  const id = candidates[Math.floor(Math.random() * candidates.length)];
+  selectNode(id);
+}
+
+// ── Error display ─────────────────────────────────────────────────────────────
+function showFetchError() {
+  document.getElementById('loading').innerHTML = `
+    <div style="text-align:center;padding:30px;max-width:400px">
+      <div style="font-size:32px;margin-bottom:12px">⚠️</div>
+      <b style="font-size:15px">Could not load data_full.json</b>
+      <p style="margin-top:12px;color:#777;font-size:13px;line-height:1.6">
+        First run the preprocessor:<br>
+        <code style="background:#f0ede8;padding:3px 8px;border-radius:4px;font-size:12px">
+          python demo/preprocess_full.py
+        </code><br><br>
+        Then serve this folder:<br>
+        <code style="background:#f0ede8;padding:3px 8px;border-radius:4px;font-size:12px">
+          python -m http.server 8000
+        </code><br><br>
+        And open <a href="http://localhost:8000/index_full.html">
+          http://localhost:8000/index_full.html
+        </a>
+      </p>
+    </div>`;
+}
+
+init().catch(err => { showFetchError(); console.error(err); });
+</script>
+</body>
+</html>

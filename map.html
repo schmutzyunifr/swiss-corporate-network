@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swiss Corporate Network — Municipality Map</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #faf9f6;
+      color: #2c2c2c;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 20px;
+      height: 52px;
+      background: #1b2a3b;
+      color: #fff;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+    #topbar h1 { font-size: 15px; font-weight: 600; letter-spacing: .4px; white-space: nowrap; }
+
+    #year-badge {
+      background: #c0392b; color: #fff;
+      font-size: 12px; font-weight: 700;
+      padding: 3px 10px; border-radius: 12px;
+      letter-spacing: .5px;
+      cursor: pointer; user-select: none;
+    }
+    #year-badge:hover { background: #a93226; }
+    #year-input {
+      display: none;
+      width: 62px;
+      background: #c0392b; color: #fff;
+      font-size: 12px; font-weight: 700;
+      padding: 3px 8px; border-radius: 12px;
+      border: 2px solid rgba(255,255,255,.7);
+      outline: none; letter-spacing: .5px;
+      -moz-appearance: textfield; text-align: center;
+    }
+    #year-input::-webkit-inner-spin-button,
+    #year-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+    #explore-btn {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 18px;
+      background: rgba(255,255,255,.12); color: #fff;
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 20px; font-size: 13px; font-weight: 500;
+      text-decoration: none; transition: background .15s; white-space: nowrap;
+    }
+    #explore-btn:hover { background: rgba(255,255,255,.22); }
+
+    /* ── Year slider ── */
+    #slider-wrap { display: flex; align-items: center; gap: 8px; }
+    .yr-end { font-size: 11px; color: rgba(255,255,255,.45); white-space: nowrap; }
+    #year-slider {
+      -webkit-appearance: none;
+      width: 180px; height: 4px;
+      border-radius: 2px; background: rgba(255,255,255,.25);
+      outline: none; cursor: pointer;
+    }
+    #year-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #c0392b; cursor: pointer; transition: transform .1s;
+    }
+    #year-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+    #year-slider::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%; border: none;
+      background: #c0392b; cursor: pointer;
+    }
+
+    /* ── Main area ── */
+    #main {
+      flex: 1; display: flex; position: relative; overflow: hidden;
+    }
+
+    /* ── SVG map ── */
+    #map-svg {
+      flex: 1; display: block;
+      background: #faf9f6;
+      cursor: grab;
+    }
+    #map-svg:active { cursor: grabbing; }
+
+    /* ── Info panel ── */
+    #info-panel {
+      width: 300px; flex-shrink: 0;
+      background: white; border-left: 1px solid #e5e5e5;
+      overflow-y: auto;
+      transform: translateX(300px);
+      transition: transform .25s ease;
+      display: flex; flex-direction: column;
+    }
+    #info-panel.open { transform: translateX(0); }
+
+    #info-header { padding: 18px 20px 14px; border-bottom: 1px solid #f0f0f0; }
+    #info-type {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; color: #999; margin-bottom: 4px;
+    }
+    #info-name {
+      font-size: 18px; font-weight: 700; color: #1b2a3b; word-break: break-word;
+    }
+    #info-body { padding: 16px 20px; flex: 1; }
+
+    .info-row { margin-bottom: 14px; }
+    .info-label {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: .8px; color: #aaa; margin-bottom: 2px;
+    }
+    .info-value { font-size: 13px; color: #333; }
+    .info-value.highlight { font-size: 20px; font-weight: 700; color: #1b2a3b; }
+
+    #connections-section { padding: 14px 20px; border-top: 1px solid #f0f0f0; }
+    .conn-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .conn-hdr h3 { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#aaa; margin-bottom:0; }
+    .conn-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 5px 0; border-bottom: 1px solid #f8f8f8;
+      font-size: 12px; cursor: pointer;
+    }
+    .conn-item:hover { background: #fafafa; }
+    .conn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #1f5fa6; }
+    .conn-name { font-weight: 600; color: #333; flex: 1; }
+    .conn-weight { color: #aaa; font-size: 11px; white-space: nowrap; }
+    .conn-more { font-size: 11px; padding-top: 6px; }
+    /* ── Connections fullscreen modal ── */
+    #conn-modal { position:fixed; inset:0; z-index:500; background:#fff; flex-direction:column; display:none; }
+    #conn-modal.open { display:flex; }
+    #conn-modal-close {
+      position:fixed; top:16px; right:20px;
+      background:#1b2a3b; color:#fff; border:none; border-radius:50%;
+      width:36px; height:36px; font-size:18px; cursor:pointer; z-index:501; line-height:1;
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:0 2px 8px rgba(0,0,0,.25);
+    }
+    #conn-modal-close:hover { background:#c0392b; }
+    #conn-modal-inner {
+      max-width:720px; width:100%; margin:0 auto;
+      padding:52px 40px 0; display:flex; flex-direction:column;
+      height:100%; box-sizing:border-box; overflow:hidden;
+    }
+    #conn-modal-title { font-size:18px; font-weight:700; color:#1b2a3b; margin-bottom:14px; flex-shrink:0; }
+    #conn-search-wrap { position:relative; margin-bottom:10px; flex-shrink:0; }
+    #conn-search {
+      width:100%; padding:8px 36px 8px 14px; box-sizing:border-box;
+      border:1px solid #ddd; border-radius:8px; font-size:13px;
+      outline:none; color:#333; font-family:inherit;
+    }
+    #conn-search:focus { border-color:#1f5fa6; box-shadow:0 0 0 2px rgba(31,95,166,.12); }
+    #conn-search-clear {
+      display:none; position:absolute; right:10px; top:50%; transform:translateY(-50%);
+      background:none; border:none; cursor:pointer; font-size:14px; color:#aaa; line-height:1;
+    }
+    #conn-search-clear:hover { color:#555; }
+    #conn-count-bar {
+      display:flex; align-items:center; justify-content:space-between;
+      font-size:11px; color:#aaa; margin-bottom:6px; flex-shrink:0;
+    }
+    #conn-list-scroll { flex:1; overflow-y:auto; border-top:1px solid #f0f0f0; }
+    #conn-list-modal .conn-item { border-bottom:1px solid #f5f5f5; padding:8px 4px; }
+    #conn-pagination {
+      display:flex; align-items:center; justify-content:center; gap:16px;
+      padding:14px 0 20px; border-top:1px solid #f0f0f0; flex-shrink:0; font-size:12px; color:#555;
+    }
+    .conn-page-btn {
+      background:#f5f5f5; border:1px solid #ddd; border-radius:6px;
+      padding:5px 18px; font-size:12px; cursor:pointer; font-family:inherit; transition:all .15s;
+    }
+    .conn-page-btn:hover:not(:disabled) { background:#e8e8e8; border-color:#bbb; }
+    .conn-page-btn:disabled { opacity:0.35; cursor:default; }
+
+    /* ── History section ── */
+    #history-section { padding: 14px 20px; border-top: 1px solid #f0f0f0; }
+    .hist-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .hist-hdr h3 { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#aaa; margin-bottom:0; }
+    .hist-fs-btn {
+      display:inline-block; background:none; border:1px solid #ddd; border-radius:4px;
+      padding:2px 8px; font-size:10px; color:#aaa; cursor:pointer;
+      font-family:inherit; line-height:1.6; transition:all .15s;
+      text-decoration:none; vertical-align:middle;
+    }
+    .hist-fs-btn:hover { background:#f0f0f0; color:#555; border-color:#bbb; }
+    .hist-active { font-size: 12px; color: #555; margin-bottom: 12px; }
+    .hist-block  { margin-bottom: 14px; }
+    .hist-label  { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: #aaa; margin-bottom: 4px; }
+    .hist-stat   { font-size: 12px; color: #333; margin: 3px 0; }
+    .hist-minmax { font-size: 11px; color: #aaa; margin-top: 2px; }
+    .hist-spark-axis { display: flex; justify-content: space-between; font-size: 10px; color: #bbb; margin-top: 1px; }
+    .hist-spark-wrap { position:relative; }
+    /* ── History fullscreen modal ── */
+    #hist-modal {
+      display:none; position:fixed; inset:0; z-index:500;
+      background:#fff; overflow-y:auto; padding:52px 60px 40px;
+    }
+    #hist-modal.open { display:block; }
+    #hist-modal-close {
+      position:fixed; top:16px; right:20px;
+      background:#1b2a3b; color:#fff; border:none;
+      border-radius:50%; width:36px; height:36px; font-size:18px;
+      cursor:pointer; z-index:501; line-height:1;
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:0 2px 8px rgba(0,0,0,.25);
+    }
+    #hist-modal-close:hover { background:#c0392b; }
+    #hist-modal-inner { max-width:660px; margin:0 auto; }
+    #hist-modal-inner .hist-spark-svg { width:100%; }
+    /* ── Hover tooltip ── */
+    #hist-tip {
+      position:fixed; display:none; pointer-events:none;
+      background:rgba(27,42,59,.9); color:#fff;
+      padding:5px 10px; border-radius:5px;
+      font-size:11px; font-weight:600; z-index:600;
+      white-space:nowrap; box-shadow:0 2px 6px rgba(0,0,0,.2);
+    }
+
+    #deselect-btn {
+      display: none;
+      position: absolute;
+      top: 16px; left: 16px;
+      background: white; border: 1px solid #ccc;
+      border-radius: 20px; padding: 7px 16px;
+      font-size: 13px; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,.1);
+      z-index: 10; transition: background .15s;
+    }
+    #deselect-btn:hover { background: #f5f5f2; }
+
+    /* ── Legend ── */
+    #legend {
+      position: absolute; bottom: 20px; left: 16px;
+      background: rgba(255,255,255,.92); border-radius: 8px;
+      padding: 12px 16px; font-size: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    }
+    #legend h4 {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; color: #999; margin-bottom: 8px;
+    }
+    .leg { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .leg-note { margin-top: 8px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 6px; }
+
+    /* ── Stats bar ── */
+    #stats {
+      position: absolute; bottom: 20px; right: 16px;
+      background: rgba(255,255,255,.88); border-radius: 8px;
+      padding: 8px 14px; font-size: 12px; color: #666;
+      box-shadow: 0 2px 6px rgba(0,0,0,.08);
+      transition: right .25s ease;
+    }
+    #stats.panel-open { right: 316px; }
+
+    /* ── Hint ── */
+    #hint {
+      position: absolute; top: 16px; left: 16px;
+      background: rgba(255,255,255,.92); border-radius: 8px;
+      padding: 10px 14px; font-size: 12px; color: #555;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1); line-height: 1.7;
+      pointer-events: none; transition: opacity .2s;
+    }
+
+    /* ── Tooltip ── */
+    #tooltip {
+      position: absolute; pointer-events: none;
+      background: rgba(27,42,59,.88); color: #fff;
+      padding: 6px 12px; border-radius: 6px; font-size: 12px;
+      white-space: nowrap; opacity: 0; transition: opacity .1s;
+      z-index: 30;
+    }
+
+    /* ── Loading ── */
+    #loading {
+      position: absolute; inset: 0; background: #faf9f6;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px; z-index: 50; font-size: 14px; color: #888;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid #e0e0e0; border-top-color: #1b2a3b;
+      border-radius: 50%; animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- ── Top bar ── -->
+<div id="topbar">
+  <h1>Swiss Corporate Network — Municipality Map</h1>
+  <span id="year-badge" title="Click to jump to a year">—</span>
+  <input id="year-input" type="number" min="1934" max="2003" />
+  <div id="slider-wrap">
+    <span class="yr-end">1934</span>
+    <input type="range" id="year-slider" min="0" max="35" value="35" step="1" />
+    <span class="yr-end">2003</span>
+  </div>
+  <a href="index.html" id="explore-btn">🔍 Explore interactively →</a>
+</div>
+
+<!-- ── Main ── -->
+<div id="main">
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Loading map data…</span>
+  </div>
+
+  <svg id="map-svg"></svg>
+
+  <div id="hint">
+    Click any municipality to explore its connections<br>
+    <span style="opacity:.7">Scroll to zoom &nbsp;·&nbsp; Drag to pan</span>
+  </div>
+
+  <button id="deselect-btn" onclick="deselectMunicipality()">← Back to full view</button>
+
+  <div id="legend">
+    <h4>Municipality size</h4>
+    <div class="leg"><div class="leg-dot" style="background:#1f5fa6;width:6px;height:6px"></div> Low activity</div>
+    <div class="leg"><div class="leg-dot" style="background:#1f5fa6;width:12px;height:12px"></div> Medium activity</div>
+    <div class="leg"><div class="leg-dot" style="background:#1f5fa6;width:18px;height:18px"></div> High activity</div>
+    <div class="leg-note">Size ∝ firms + directors<br>Lines = board-seat connections</div>
+  </div>
+
+  <div id="stats"></div>
+  <div id="tooltip"></div>
+
+  <!-- Info panel -->
+  <div id="info-panel">
+    <div id="info-header">
+      <div id="info-type">Municipality</div>
+      <div id="info-name"></div>
+    </div>
+    <div id="info-body"></div>
+    <div id="connections-section">
+      <div class="conn-hdr">
+        <h3>Connected municipalities</h3>
+        <button class="hist-fs-btn" id="conn-fs-btn">Full ↗</button>
+      </div>
+      <div id="connections-list"></div>
+    </div>
+    <div id="history-section">
+      <div class="hist-hdr">
+        <h3>History</h3>
+        <div style="display:flex;gap:5px;align-items:center">
+          <a href="ranking_growth.html" class="hist-fs-btn" target="_blank" title="Growth ranking across all periods">↑ Rankings</a>
+          <button class="hist-fs-btn" id="hist-fs-btn">Full ↗</button>
+        </div>
+      </div>
+      <div id="history-content"><span style="color:#bbb;font-size:12px">Click a municipality to see its history</span></div>
+    </div>
+  </div>
+
+</div>
+
+<div id="conn-modal">
+  <button id="conn-modal-close">✕</button>
+  <div id="conn-modal-inner">
+    <div id="conn-modal-title"></div>
+    <div id="conn-search-wrap">
+      <input id="conn-search" type="text" placeholder="Search municipalities…" autocomplete="off"/>
+      <button id="conn-search-clear">✕</button>
+    </div>
+    <div id="conn-count-bar">
+      <span id="conn-count-text"></span>
+      <span id="conn-page-info"></span>
+    </div>
+    <div id="conn-list-scroll">
+      <div id="conn-list-modal"></div>
+    </div>
+    <div id="conn-pagination">
+      <button class="conn-page-btn" id="conn-prev">← Prev</button>
+      <span id="conn-page-label"></span>
+      <button class="conn-page-btn" id="conn-next">Next →</button>
+    </div>
+  </div>
+</div>
+<div id="hist-modal">
+  <button id="hist-modal-close">✕</button>
+  <div id="hist-modal-inner"></div>
+</div>
+<div id="hist-tip"></div>
+
+<script>
+const YEARS = [1934, 1943, 1960, 1962, 1963, 1964, 1965, 1966, 1969, 1972, 1975,
+               1979, 1980, 1981, 1982, 1983, 1984, 1985, 1986, 1987, 1988, 1989,
+               1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999,
+               2000, 2001, 2002, 2003];
+
+let mapData     = null;
+let munIndex    = {};   // gdenr → municipality object
+let munEdges    = {};   // gdenr → [edges]
+let selectedGdenr = null;
+
+// D3 elements
+const svgEl  = document.getElementById('map-svg');
+const svg    = d3.select('#map-svg');
+const gRoot  = svg.append('g').attr('id', 'root');
+const gEdges = gRoot.append('g').attr('id', 'base-edges');
+const gSelE  = gRoot.append('g').attr('id', 'sel-edges');
+const gNodes = gRoot.append('g').attr('id', 'nodes');
+const gLabels= gRoot.append('g').attr('id', 'labels');
+
+// Scales (reset on each load)
+let xScale, yScale, rScale;
+
+// D3 zoom
+const zoomBehavior = d3.zoom()
+  .scaleExtent([0.25, 30])
+  .on('zoom', e => gRoot.attr('transform', e.transform));
+
+svg.call(zoomBehavior)
+   .on('dblclick.zoom', null)
+   .on('click', (event) => {
+     if (event.target === svgEl && selectedGdenr) deselectMunicipality();
+   });
+
+// ── Year selector ─────────────────────────────────────────────────────────────
+const badge  = document.getElementById('year-badge');
+const input  = document.getElementById('year-input');
+const slider = document.getElementById('year-slider');
+
+function nearestYear(typed) {
+  return YEARS.reduce((b, y) => Math.abs(y - typed) < Math.abs(b - typed) ? y : b);
+}
+
+badge.addEventListener('click', () => {
+  input.value = badge.textContent !== '—' ? badge.textContent : '';
+  badge.style.display = 'none';
+  input.style.display = 'inline-block';
+  input.focus(); input.select();
+});
+
+async function commitYear() {
+  const typed = parseInt(input.value);
+  input.style.display = 'none';
+  badge.style.display = '';
+  if (!isNaN(typed)) await loadYear(nearestYear(typed));
+}
+
+input.addEventListener('keydown', async e => {
+  if (e.key === 'Enter') { e.preventDefault(); await commitYear(); }
+  if (e.key === 'Escape') { input.style.display = 'none'; badge.style.display = ''; }
+});
+input.addEventListener('blur', commitYear);
+
+slider.addEventListener('change', async () => {
+  const year = YEARS[parseInt(slider.value)];
+  if (year !== mapData?.year) await loadYear(year);
+});
+
+// ── Load year ─────────────────────────────────────────────────────────────────
+async function loadYear(year) {
+  document.getElementById('loading').style.display = 'flex';
+  deselectMunicipality(true);  // silent deselect
+
+  let res = await fetch(`map_data_${year}.json`);
+  if (!res.ok) {
+    document.getElementById('loading').innerHTML = `
+      <div style="text-align:center;padding:30px;color:#666;max-width:360px">
+        <div style="font-size:28px;margin-bottom:10px">⚠️</div>
+        <b>map_data_${year}.json not found</b><br><br>
+        Generate all map data first:<br>
+        <code style="background:#f0ede8;padding:3px 8px;border-radius:4px;font-size:12px">
+          python demo/preprocess_map.py
+        </code>
+      </div>`;
+    return;
+  }
+
+  mapData = await res.json();
+  document.getElementById('explore-btn').href = `index.html?year=${year}`;
+
+  // Build indexes
+  munIndex = {};
+  munEdges = {};
+  mapData.municipalities.forEach(m => {
+    munIndex[m.gdenr] = m;
+    munEdges[m.gdenr] = [];
+  });
+  mapData.edges.forEach(e => {
+    if (munEdges[e.src]) munEdges[e.src].push(e);
+    if (munEdges[e.dst]) munEdges[e.dst].push(e);
+  });
+
+  // Sync controls
+  badge.textContent = year;
+  slider.value = YEARS.indexOf(year);
+  localStorage.setItem('activeYear', year);
+
+  // Update stats bar
+  const m = mapData.metadata;
+  document.getElementById('stats').textContent =
+    `${m.n_firms.toLocaleString()} firms · ` +
+    `${m.n_directors.toLocaleString()} directors · ` +
+    `${m.n_municipalities.toLocaleString()} municipalities`;
+
+  render();
+  document.getElementById('loading').style.display = 'none';
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() {
+  const W = svgEl.clientWidth  || 800;
+  const H = svgEl.clientHeight || 600;
+  const pad = 50;
+
+  const muns = mapData.municipalities;
+
+  xScale = d3.scaleLinear()
+    .domain(d3.extent(muns, d => d.E))
+    .range([pad, W - pad]);
+
+  yScale = d3.scaleLinear()
+    .domain(d3.extent(muns, d => d.N))
+    .range([H - pad, pad]);   // flip Y axis
+
+  const maxTotal = d3.max(muns, d => d.total) || 1;
+  rScale = d3.scaleSqrt().domain([0, maxTotal]).range([2.5, 18]);
+
+  // ── Base edges (top 600 by weight) ──
+  const topEdges = [...mapData.edges]
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 600);
+  const maxW = topEdges[0]?.weight || 1;
+
+  gEdges.selectAll('line').data(topEdges, d => `${d.src}-${d.dst}`)
+    .join('line')
+    .attr('class', 'base-edge')
+    .attr('x1', d => xScale(munIndex[d.src]?.E ?? 0))
+    .attr('y1', d => yScale(munIndex[d.src]?.N ?? 0))
+    .attr('x2', d => xScale(munIndex[d.dst]?.E ?? 0))
+    .attr('y2', d => yScale(munIndex[d.dst]?.N ?? 0))
+    .attr('stroke', '#8baec8')
+    .attr('stroke-opacity', d => 0.06 + 0.24 * (d.weight / maxW))
+    .attr('stroke-width',   d => 0.3  + 1.2  * (d.weight / maxW))
+    .attr('stroke-linecap', 'round');
+
+  // ── Nodes ──
+  const sorted = [...muns].sort((a, b) => b.total - a.total);
+
+  gNodes.selectAll('circle').data(sorted, d => d.gdenr)
+    .join('circle')
+    .attr('class', 'mun-node')
+    .attr('cx', d => xScale(d.E))
+    .attr('cy', d => yScale(d.N))
+    .attr('r',  d => rScale(d.total))
+    .attr('fill', '#1f5fa6')
+    .attr('fill-opacity', 0.65)
+    .attr('stroke', 'none')
+    .style('cursor', 'pointer')
+    .on('mouseover', showTooltip)
+    .on('mousemove', moveTooltip)
+    .on('mouseout',  hideTooltip)
+    .on('click', (event, d) => {
+      event.stopPropagation();
+      selectMunicipality(d.gdenr);
+    });
+
+  // ── Labels for top 20 by total ──
+  const top20 = [...muns].sort((a, b) => b.total - a.total).slice(0, 20);
+  gLabels.selectAll('text').data(top20, d => d.gdenr)
+    .join('text')
+    .attr('x', d => xScale(d.E) + rScale(d.total) + 3)
+    .attr('y', d => yScale(d.N) + 4)
+    .text(d => d.name)
+    .attr('font-size', '8px')
+    .attr('font-weight', 'bold')
+    .attr('fill', '#1b2a3b')
+    .attr('fill-opacity', 0.8)
+    .attr('pointer-events', 'none');
+
+  // Reset zoom to fit
+  svg.call(zoomBehavior.transform, d3.zoomIdentity);
+}
+
+// ── Select municipality ────────────────────────────────────────────────────────
+// ── Municipality history helpers ──────────────────────────────────────────────
+let _munHistCache = null;
+
+async function loadMunHistory() {
+  if (_munHistCache !== null) return _munHistCache;
+  try {
+    const res = await fetch('mun_history.json');
+    _munHistCache = res.ok ? await res.json() : {};
+  } catch(_) { _munHistCache = {}; }
+  return _munHistCache;
+}
+
+const _sparkReg = new Map();  // sparkId → coord data for hover
+
+function sparklineSVG(valByYear, years, sparkId, W = 210, H = 52) {
+  const pts = years.filter(y => valByYear[y] != null);
+  if (pts.length < 2) return '';
+  const vals = pts.map(y => valByYear[y]);
+  const minV = Math.min(...vals), maxV = Math.max(...vals), rangeV = maxV - minV || 1;
+  const minYr = pts[0], maxYr = pts[pts.length - 1], rangeYr = maxYr - minYr || 1;
+  const pad = 4;
+  _sparkReg.set(sparkId, {pts, vals, minV, maxV, rangeV, minYr, maxYr, rangeYr, pad, W, H, isRank:false});
+  const coords = pts.map(y => ({
+    x: pad + ((y - minYr) / rangeYr) * (W - 2 * pad),
+    y: (H - pad) - ((valByYear[y] - minV) / rangeV) * (H - 2 * pad),
+  }));
+  const polyline = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+  const dots = coords.map(c =>
+    `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="2.5" fill="#1f5fa6" stroke="white" stroke-width="1"/>`
+  ).join('');
+  return `<div class="hist-spark-wrap">
+  <svg class="hist-spark-svg" data-spark-id="${sparkId}" width="${W}" height="${H}"
+    viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible;cursor:crosshair">
+    <polyline points="${polyline}" fill="none" stroke="#1f5fa6" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+    <line class="spark-vcursor" x1="0" y1="0" x2="0" y2="${H}"
+      stroke="#666" stroke-width="1" stroke-dasharray="3,2" opacity="0"/>
+    <circle class="spark-hitdot" cx="0" cy="0" r="4"
+      fill="#c0392b" stroke="white" stroke-width="1.5" opacity="0"/>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
+  </svg>
+  <div class="hist-spark-axis"><span>${minYr}</span><span>${maxYr}</span></div>
+</div>`;
+}
+
+function rankChartSVG(rankByYear, nByYear, years, curYear, sparkId, W = 210, H = 60) {
+  const pts = years.filter(y => rankByYear[y] != null);
+  if (pts.length < 2) return '';
+  const ranks = pts.map(y => rankByYear[y]);
+  const minR = Math.min(...ranks), maxR = Math.max(...ranks), rangeR = maxR - minR || 1;
+  const minYr = pts[0], maxYr = pts[pts.length - 1], rangeYr = maxYr - minYr || 1;
+  const pL = 2, pR = 2, pT = 16, pB = 4;
+  const cW = W - pL - pR, cH = H - pT - pB;
+  const cx = y => pL + ((y - minYr) / rangeYr) * cW;
+  const cy = r => pT + ((r - minR) / rangeR) * cH;
+  _sparkReg.set(sparkId, {pts, vals:ranks, minV:minR, maxV:maxR, rangeV:rangeR,
+    minYr, maxYr, rangeYr, pL, pR, pT, pB, W, H, isRank:true, nByYear});
+  const polyline = pts.map(y => `${cx(y).toFixed(1)},${cy(rankByYear[y]).toFixed(1)}`).join(' ');
+  const curH = (curYear != null && rankByYear[curYear] != null) ? `
+    <line x1="${cx(curYear).toFixed(1)}" y1="${pT}" x2="${cx(curYear).toFixed(1)}" y2="${pT+cH}"
+      stroke="#c0392b" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+    <circle cx="${cx(curYear).toFixed(1)}" cy="${cy(rankByYear[curYear]).toFixed(1)}"
+      r="4" fill="#c0392b" stroke="white" stroke-width="1.5"/>` : '';
+  const topLbl = `<text x="${pL}" y="${pT-4}" font-size="9" fill="#bbb" font-family="inherit">#${minR} ↑ best</text>`;
+  const botLbl = `<text x="${pL}" y="${pT+cH+11}" font-size="9" fill="#bbb" font-family="inherit">#${maxR} worst</text>`;
+  return `<div class="hist-spark-wrap">
+  <svg class="hist-spark-svg rank-chart-svg" data-spark-id="${sparkId}" width="${W}" height="${H+14}"
+    viewBox="0 0 ${W} ${H+14}" style="display:block;overflow:visible;cursor:crosshair">
+    ${topLbl}${botLbl}
+    <polyline points="${polyline}" fill="none" stroke="#7ba7cc" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    ${curH}
+    <line class="spark-vcursor" x1="0" y1="${pT}" x2="0" y2="${pT+cH}"
+      stroke="#666" stroke-width="1" stroke-dasharray="3,2" opacity="0"/>
+    <circle class="spark-hitdot" cx="0" cy="0" r="4"
+      fill="#888" stroke="white" stroke-width="1.5" opacity="0"/>
+    <rect x="${pL}" y="${pT}" width="${cW}" height="${cH}" fill="transparent"/>
+  </svg>
+  <div class="hist-spark-axis"><span>${minYr}</span><span>${maxYr}</span></div>
+</div>`;
+}
+
+function rankDiff(oldRank, newRank) {
+  if (oldRank == null || newRank == null) return '<span style="color:#bbb">—</span>';
+  const d = oldRank - newRank;
+  if (d > 0) return `<span style="color:#27ae60;font-weight:600">↑ ${d}</span>`;
+  if (d < 0) return `<span style="color:#c0392b;font-weight:600">↓ ${Math.abs(d)}</span>`;
+  return `<span style="color:#999">no change</span>`;
+}
+
+function buildMunHistoryHtml(gdenr, histData) {
+  const h = histData?.[String(gdenr)];
+  if (!h) return '<span style="color:#bbb;font-size:12px">No history data.<br>Run preprocess_history.py first.</span>';
+
+  const year    = mapData.year;
+  const years   = h.years;
+  const curCw   = h.cw[year];
+  const curRank = h.rank[year];
+  const curN    = h.n[year];
+  const pct     = curRank && curN ? Math.ceil(curRank / curN * 100) : null;
+
+  const spark  = sparklineSVG(h.cw, years, `scw-${gdenr}`);
+  const minCw  = Math.min(...years.map(y => h.cw[y]));
+  const maxCw  = Math.max(...years.map(y => h.cw[y]));
+  const rankCh = rankChartSVG(h.rank, h.n, years, year, `srank-${gdenr}`);
+
+  return `
+    <div class="hist-active">
+      Active <b>${h.entry}</b> – <b>${h.exit}</b>
+      <span style="color:#bbb">(${years.length} of ${YEARS.length} years)</span>
+    </div>
+    <div class="hist-block">
+      <div class="hist-label">Connection weight over time</div>
+      ${spark}
+      <div class="hist-minmax">Min ${minCw} · Max ${maxCw} · Current ${curCw ?? '—'}</div>
+    </div>
+    <div class="hist-block">
+      <div class="hist-label">Ranking over time (by connectivity)</div>
+      <div class="hist-stat" style="margin-bottom:6px">Current: <b>${curRank ?? '—'} of ${curN ?? '—'}</b>${pct != null ? ` <span style="color:#aaa">(top ${pct}%)</span>` : ''}</div>
+      ${rankCh}
+    </div>`;
+}
+
+// ── History interactivity ─────────────────────────────────────────────────────
+function attachSparkInteractivity(container) {
+  const tip = document.getElementById('hist-tip');
+  container.querySelectorAll('.hist-spark-svg').forEach(svg => {
+    const d = _sparkReg.get(svg.dataset.sparkId);
+    if (!d) return;
+    svg.addEventListener('mousemove', e => {
+      const rect = svg.getBoundingClientRect();
+      const svgW = +svg.getAttribute('width') || d.W;
+      const mx   = (e.clientX - rect.left) * (svgW / rect.width);
+      const padL = d.isRank ? d.pL : d.pad;
+      const padR = d.isRank ? d.pR : d.pad;
+      const chartW = svgW - padL - padR;
+      let ni = 0, md = Infinity;
+      d.pts.forEach((y, i) => {
+        const dx = Math.abs(mx - (padL + ((y - d.minYr) / d.rangeYr) * chartW));
+        if (dx < md) { md = dx; ni = i; }
+      });
+      const nearY = d.pts[ni], nearV = d.vals[ni];
+      const xPt = padL + ((nearY - d.minYr) / d.rangeYr) * chartW;
+      const yPt = d.isRank
+        ? d.pT + ((nearV - d.minV) / d.rangeV) * (d.H - d.pT - d.pB)
+        : (d.H - d.pad) - ((nearV - d.minV) / d.rangeV) * (d.H - 2 * d.pad);
+      svg.querySelector('.spark-vcursor')?.setAttribute('x1', xPt.toFixed(1));
+      svg.querySelector('.spark-vcursor')?.setAttribute('x2', xPt.toFixed(1));
+      svg.querySelector('.spark-vcursor')?.setAttribute('opacity', '0.7');
+      const hd = svg.querySelector('.spark-hitdot');
+      hd?.setAttribute('cx', xPt.toFixed(1));
+      hd?.setAttribute('cy', yPt.toFixed(1));
+      hd?.setAttribute('opacity', '1');
+      let label;
+      if (d.isRank) {
+        const n = d.nByYear[nearY];
+        const p = n ? Math.ceil(nearV / n * 100) : null;
+        label = `${nearY}: rank ${nearV}${n ? ' / '+n : ''}${p != null ? ' · top '+p+'%' : ''}`;
+      } else {
+        label = `${nearY}: ${nearV}`;
+      }
+      tip.textContent = label;
+      tip.style.display = 'block';
+      tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 230) + 'px';
+      tip.style.top  = (e.clientY - 36) + 'px';
+    });
+    svg.addEventListener('mouseleave', () => {
+      svg.querySelector('.spark-vcursor')?.setAttribute('opacity', '0');
+      svg.querySelector('.spark-hitdot')?.setAttribute('opacity', '0');
+      tip.style.display = 'none';
+    });
+  });
+}
+
+function openHistFullscreen() {
+  const inner = document.getElementById('hist-modal-inner');
+  const name = document.getElementById('info-name')?.textContent || '';
+  const titleHtml = name ? `<div style="margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #f0f0f0">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#aaa;margin-bottom:4px">Municipality</div>
+    <div style="font-size:20px;font-weight:700;color:#1b2a3b">${name}</div>
+  </div>` : '';
+  inner.innerHTML = titleHtml + document.getElementById('history-content').innerHTML;
+  document.getElementById('hist-modal').classList.add('open');
+  attachSparkInteractivity(inner);
+}
+function closeHistFullscreen() {
+  document.getElementById('hist-modal').classList.remove('open');
+}
+document.getElementById('hist-fs-btn').addEventListener('click', openHistFullscreen);
+document.getElementById('hist-modal-close').addEventListener('click', closeHistFullscreen);
+
+// ── Connections fullscreen modal ──────────────────────────────────────────────
+let _connFiltered = [], _connPage = 0;
+const CONN_PAGE = 25;
+
+function openConnModal() {
+  const name = document.getElementById('info-name')?.textContent || 'municipality';
+  document.getElementById('conn-modal-title').textContent = `Connections of ${name}`;
+  document.getElementById('conn-search').value = '';
+  document.getElementById('conn-search-clear').style.display = 'none';
+  _connPage = 0;
+  filterAndRenderConn('');
+  document.getElementById('conn-modal').classList.add('open');
+  setTimeout(() => document.getElementById('conn-search').focus(), 80);
+}
+function closeConnModal() {
+  document.getElementById('conn-modal').classList.remove('open');
+}
+function filterAndRenderConn(query) {
+  const q = query.trim().toLowerCase();
+  _connFiltered = q ? _connAll.filter(c => c.name.toLowerCase().includes(q)) : [..._connAll];
+  _connPage = 0;
+  renderConnPage();
+}
+function renderConnPage() {
+  const total = _connFiltered.length;
+  const pages = Math.max(1, Math.ceil(total / CONN_PAGE));
+  const slice = _connFiltered.slice(_connPage * CONN_PAGE, (_connPage + 1) * CONN_PAGE);
+  document.getElementById('conn-count-text').textContent =
+    `${total.toLocaleString()} connection${total !== 1 ? 's' : ''}`;
+  document.getElementById('conn-page-label').textContent = `Page ${_connPage + 1} of ${pages}`;
+  document.getElementById('conn-prev').disabled = _connPage === 0;
+  document.getElementById('conn-next').disabled = _connPage >= pages - 1;
+  document.getElementById('conn-list-modal').innerHTML = slice.length
+    ? slice.map(c => `<div class="conn-item" onclick="closeConnModal();selectMunicipality(${c.id})">
+        <div class="conn-dot"></div>
+        <span class="conn-name">${c.name}</span>
+        <span class="conn-weight">${c.weight} seats</span>
+      </div>`).join('')
+    : '<div style="padding:24px;color:#aaa;text-align:center;font-size:13px">No matches</div>';
+  document.getElementById('conn-list-scroll').scrollTop = 0;
+}
+document.getElementById('conn-fs-btn').addEventListener('click', openConnModal);
+document.getElementById('conn-modal-close').addEventListener('click', closeConnModal);
+document.getElementById('conn-prev').addEventListener('click', () => { _connPage--; renderConnPage(); });
+document.getElementById('conn-next').addEventListener('click', () => { _connPage++; renderConnPage(); });
+document.getElementById('conn-search').addEventListener('input', e => {
+  document.getElementById('conn-search-clear').style.display = e.target.value ? 'block' : 'none';
+  filterAndRenderConn(e.target.value);
+});
+document.getElementById('conn-search-clear').addEventListener('click', () => {
+  document.getElementById('conn-search').value = '';
+  document.getElementById('conn-search-clear').style.display = 'none';
+  filterAndRenderConn('');
+  document.getElementById('conn-search').focus();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeHistFullscreen(); closeConnModal(); } });
+
+async function selectMunicipality(gdenr) {
+  selectedGdenr = gdenr;
+  const edges = munEdges[gdenr] || [];
+  const neighbors = new Set(edges.map(e => e.src === gdenr ? e.dst : e.src));
+
+  // Dim/highlight nodes
+  gNodes.selectAll('.mun-node')
+    .attr('fill', d =>
+      d.gdenr === gdenr    ? '#c0392b' :
+      neighbors.has(d.gdenr) ? '#1f5fa6' : '#b0b8c4')
+    .attr('fill-opacity', d =>
+      d.gdenr === gdenr    ? 1.0 :
+      neighbors.has(d.gdenr) ? 0.75 : 0.15)
+    .attr('r', d =>
+      d.gdenr === gdenr ? rScale(munIndex[d.gdenr].total) * 1.5 : rScale(d.total));
+
+  // Dim base edges
+  gEdges.selectAll('.base-edge')
+    .attr('stroke-opacity', 0.04)
+    .attr('stroke-width', 0.3);
+
+  // Draw selected municipality's edges on sel-edges layer
+  gSelE.selectAll('line').remove();
+  const maxW = edges.length ? d3.max(edges, e => e.weight) : 1;
+  gSelE.selectAll('line').data(edges)
+    .join('line')
+    .attr('x1', d => xScale(munIndex[d.src]?.E ?? 0))
+    .attr('y1', d => yScale(munIndex[d.src]?.N ?? 0))
+    .attr('x2', d => xScale(munIndex[d.dst]?.E ?? 0))
+    .attr('y2', d => yScale(munIndex[d.dst]?.N ?? 0))
+    .attr('stroke', '#1f5fa6')
+    .attr('stroke-opacity', d => 0.2 + 0.6 * (d.weight / maxW))
+    .attr('stroke-width',   d => 0.6 + 1.8 * (d.weight / maxW))
+    .attr('stroke-linecap', 'round')
+    .attr('pointer-events', 'none');
+
+  document.getElementById('deselect-btn').style.display = 'block';
+  document.getElementById('hint').style.opacity = '0';
+  renderInfoPanel(gdenr, neighbors, edges);
+  document.getElementById('info-panel').classList.add('open');
+  document.getElementById('stats').classList.add('panel-open');
+
+  // Load history asynchronously
+  const histData = await loadMunHistory();
+  if (selectedGdenr === gdenr) {  // guard: user may have clicked elsewhere
+    const hc = document.getElementById('history-content');
+    hc.innerHTML = buildMunHistoryHtml(gdenr, histData);
+    attachSparkInteractivity(hc);
+  }
+}
+
+// ── Deselect ───────────────────────────────────────────────────────────────────
+function deselectMunicipality(silent) {
+  selectedGdenr = null;
+  gSelE.selectAll('line').remove();
+
+  const muns = mapData?.municipalities || [];
+  const maxW = mapData?.edges.length
+    ? d3.max(mapData.edges.slice(0, 600), e => e.weight) || 1
+    : 1;
+
+  gNodes.selectAll('.mun-node')
+    .attr('fill', '#1f5fa6')
+    .attr('fill-opacity', 0.65)
+    .attr('r', d => rScale(d.total));
+
+  gEdges.selectAll('.base-edge')
+    .attr('stroke-opacity', d => 0.06 + 0.24 * (d.weight / maxW))
+    .attr('stroke-width',   d => 0.3  + 1.2  * (d.weight / maxW));
+
+  if (!silent) {
+    document.getElementById('info-panel').classList.remove('open');
+    document.getElementById('stats').classList.remove('panel-open');
+    document.getElementById('deselect-btn').style.display = 'none';
+    document.getElementById('hint').style.opacity = '1';
+  }
+}
+
+// ── Info panel ─────────────────────────────────────────────────────────────────
+let _connAll = [];   // full sorted connections for current selection
+
+function renderInfoPanel(gdenr, neighbors, edges) {
+  const m = munIndex[gdenr];
+  document.getElementById('info-type').textContent = `Municipality · gdenr ${m.gdenr}`;
+  document.getElementById('info-name').textContent = m.name || `(gdenr ${m.gdenr})`;
+
+  function row(label, value) {
+    return `<div class="info-row">
+      <div class="info-label">${label}</div>
+      <div class="info-value">${value}</div>
+    </div>`;
+  }
+
+  let html = '';
+  html += row('Firms', `<span class="highlight">${m.n_firms.toLocaleString()}</span>`);
+  html += row('Directors', `<span class="highlight">${m.n_dirs.toLocaleString()}</span>`);
+  html += row('Connected municipalities', `<span class="highlight">${m.n_connections.toLocaleString()}</span>`);
+  html += row('Total board-seat connections', m.conn_weight.toLocaleString());
+  html += row('Rank by connectivity',
+    `<b>${m.rank}</b> of ${mapData.metadata.n_municipalities.toLocaleString()}`);
+  document.getElementById('info-body').innerHTML = html;
+
+  // Connections list: top 12 neighbours by weight
+  const sorted = [...edges].sort((a, b) => b.weight - a.weight);
+
+  // Store full list for the modal
+  _connAll = sorted.map(e => {
+    const nbrId = e.src === gdenr ? e.dst : e.src;
+    const nbr   = munIndex[nbrId];
+    return { id: nbrId, name: nbr ? (nbr.name || `gdenr ${nbrId}`) : `gdenr ${nbrId}`, weight: e.weight };
+  });
+
+  const top12 = sorted.slice(0, 12);
+  const extra = sorted.length - top12.length;
+
+  const listHtml = top12.map(e => {
+    const nbrId  = e.src === gdenr ? e.dst : e.src;
+    const nbr    = munIndex[nbrId];
+    const name   = nbr ? (nbr.name || `gdenr ${nbrId}`) : `gdenr ${nbrId}`;
+    return `<div class="conn-item" onclick="selectMunicipality(${nbrId})">
+      <div class="conn-dot"></div>
+      <span class="conn-name">${name}</span>
+      <span class="conn-weight">${e.weight} seats</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('connections-list').innerHTML =
+    listHtml + (extra > 0
+      ? `<div class="conn-more" onclick="openConnModal()" style="cursor:pointer;color:#1f5fa6">+ ${extra} more — View all ↗</div>`
+      : '');
+}
+
+// ── Tooltip ────────────────────────────────────────────────────────────────────
+const tooltip = document.getElementById('tooltip');
+
+function showTooltip(event, d) {
+  tooltip.textContent = d.name || `gdenr ${d.gdenr}`;
+  tooltip.style.opacity = '1';
+  moveTooltip(event);
+}
+function moveTooltip(event) {
+  const rect = svgEl.getBoundingClientRect();
+  tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
+  tooltip.style.top  = (event.clientY - rect.top  - 28) + 'px';
+}
+function hideTooltip() { tooltip.style.opacity = '0'; }
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+(async () => {
+  const stored = parseInt(localStorage.getItem('activeYear'));
+  const initial = YEARS.includes(stored) ? stored : 1934;
+  try {
+    await loadYear(initial);
+  } catch (err) {
+    document.getElementById('loading').innerHTML = `
+      <div style="text-align:center;padding:30px;color:#c0392b;max-width:360px">
+        <b>Could not load map data</b><br><br>
+        Run: <code style="background:#eee;padding:4px 8px;border-radius:4px">
+          python demo/preprocess_map.py
+        </code><br><br>
+        Then serve via HTTP:
+        <code style="background:#eee;padding:4px 8px;border-radius:4px">
+          python -m http.server 8000
+        </code>
+      </div>`;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

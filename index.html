@@ -983,12 +983,26 @@ const _histCache = {};   // 'firm' | 'director' → data object or null
 
 async function loadHistory(type) {
   if (type in _histCache) return _histCache[type];
-  const file = type === 'firm' ? 'firm_history.json' : 'director_history.json';
-  try {
-    const res = await fetch(file);
-    _histCache[type] = res.ok ? await res.json() : null;
-  } catch(_) { _histCache[type] = null; }
-  return _histCache[type];
+  const base = type === 'firm' ? 'firm_history' : 'director_history';
+  // Try numbered chunks first (base_1.json, base_2.json, …), then fall back to
+  // the single monolithic file so the site works in both configurations.
+  let merged = null;
+  for (let i = 1; i <= 10; i++) {
+    try {
+      const r = await fetch(`${base}_${i}.json`);
+      if (!r.ok) break;
+      if (!merged) merged = {};
+      Object.assign(merged, await r.json());
+    } catch(_) { break; }
+  }
+  if (!merged) {
+    try {
+      const r = await fetch(`${base}.json`);
+      if (r.ok) merged = await r.json();
+    } catch(_) {}
+  }
+  _histCache[type] = merged;
+  return merged;
 }
 
 const _sparkReg = new Map();  // sparkId → coord data for hover
